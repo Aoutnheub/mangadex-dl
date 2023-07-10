@@ -4,6 +4,10 @@ const args = @import("./args.zig");
 
 const Client = @import("./client.zig").Client;
 
+const stdout = std.io.getStdOut().writer();
+const stderr = std.io.getStdErr().writer();
+const version = "v1.1";
+
 var runtime_opts: struct {
     print_links: bool = false,
     color: bool = if(builtin.os.tag == .windows) false else true,
@@ -11,9 +15,6 @@ var runtime_opts: struct {
     range: ?std.meta.Tuple(&.{ u32, u32 }) = null,
     name: ?[]const u8 = null,
 } = .{};
-
-const stdout = std.io.getStdOut().writer();
-const stderr = std.io.getStdErr().writer();
 
 fn printError(comptime fmt: []const u8, _args: anytype) !void {
     if(runtime_opts.color) {
@@ -53,7 +54,7 @@ fn parseRange(range: []const u8) !struct{ u32, u32 } {
 pub fn main() !void {
     // Argument parser
     var parser = args.Parser.init(
-        std.heap.page_allocator, "mangadex-dl v1.0",
+        std.heap.page_allocator, "mangadex-dl " ++ version,
         \\CLI utility for downloading chapters from mangadex.
         \\Usage: mangadex-dl [OPTIONS] <CHAPTER_LINK>
     );
@@ -61,6 +62,7 @@ pub fn main() !void {
     parser.colors = runtime_opts.color;
     // Flags
     try parser.addFlag("help", "Print this message and exit", 'h');
+    try parser.addFlag("version", "Print version and exit", 'v');
     try parser.addFlag("print-links", "Print the links to all the pages without downloading any", 'l');
     try parser.addFlag("color", "Toggle colored output. Enabled by default if not on Windows", null);
     try parser.addFlag("data-saver", "Download compressed images. Smaller size, less quality", 's');
@@ -99,6 +101,10 @@ pub fn main() !void {
     if(results.flag) |flag| {
         if(flag.get("help") != null) {
             try parser.help();
+            std.process.exit(0);
+        }
+        if(flag.get("version") != null) {
+            try stdout.print("Version " ++ version ++ "\n", .{});
             std.process.exit(0);
         }
         if(flag.get("print-links") != null) {
