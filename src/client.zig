@@ -1,25 +1,29 @@
 const std = @import("std");
 
 pub const ChapterData = struct {
-    _buf: []u8 = undefined,
-    base_url: []const u8 = undefined,
-    hash: []const u8 = undefined,
-    data: *const std.ArrayList(std.json.Value) = undefined,
-    data_saver: *const std.ArrayList(std.json.Value) = undefined
+    result: []const u8 = undefined,
+    baseUrl: []const u8 = undefined,
+    chapter: struct {
+        hash: []const u8 = undefined,
+        data: [][]const u8 = undefined,
+        dataSaver: [][]const u8 = undefined
+    } = undefined
 };
 
 pub const Client = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    client: std.http.Client = undefined,
-    chapter_data: ChapterData = ChapterData{},
+    client: std.http.Client,
+    chapter_buf: []const u8,
+    chapter_data: ?std.json.Parsed(ChapterData) = null,
     file_name: ?[]const u8 = null,
 
     pub fn init(allocator: std.mem.Allocator, link: []const u8) !Self {
         var client = Self{
             .allocator = allocator,
-            .client = std.http.Client{ .allocator = allocator }
+            .client = std.http.Client{ .allocator = allocator },
+            .chapter_buf = try allocator.alloc(u8, 0)
         };
         try client.getChapterData(link);
 
@@ -28,7 +32,8 @@ pub const Client = struct {
 
     pub fn deinit(self: *Self) void {
         self.client.deinit();
-        self.allocator.free(self.chapter_data._buf);
+        self.allocator.free(self.chapter_buf);
+        if(self.chapter_data) |cd| { cd.deinit(); }
     }
 
     pub fn downloadPage(self: *Client, link: []const u8, file_name: []const u8) !void {
@@ -52,8 +57,10 @@ pub const Client = struct {
         comptime dw_end_callback: fn() anyerror!void,
     ) !void {
         try self.downloadAllPagesOfType(
-            self.chapter_data.data, self.chapter_data.base_url, self.chapter_data.hash, "data",
-            range, dw_start_callback, dw_end_callback
+            self.chapter_data.?.value.chapter.data,
+            self.chapter_data.?.value.baseUrl,
+            self.chapter_data.?.value.chapter.hash,
+            "data", range, dw_start_callback, dw_end_callback
         );
     }
 
@@ -63,8 +70,10 @@ pub const Client = struct {
         comptime dw_end_callback: fn() anyerror!void,
     ) !void {
         try self.downloadAllPagesOfType(
-            self.chapter_data.data_saver, self.chapter_data.base_url, self.chapter_data.hash, "data-saver",
-            range, dw_start_callback, dw_end_callback
+            self.chapter_data.?.value.chapter.dataSaver,
+            self.chapter_data.?.value.baseUrl,
+            self.chapter_data.?.value.chapter.hash,
+            "data-saver", range, dw_start_callback, dw_end_callback
         );
     }
 
@@ -73,55 +82,36 @@ pub const Client = struct {
     }
 
     fn getChapterData(self: *Client, link: []const u8) !void {
-        // Get
         var req = try self.client.request(
             .GET, try std.Uri.parse(link), .{ .allocator = self.allocator }, .{}
         );
         defer req.deinit();
         try req.start();
         try req.wait();
-        self.chapter_data._buf = try req.reader().readAllAlloc(self.allocator, 10_000);
-
-        // Parse
-        var parser = std.json.Parser.init(self.allocator, std.json.AllocWhen.alloc_if_needed);
-        defer parser.deinit();
-        var ch_data_json = try parser.parse(self.chapter_data._buf);
-        {
-            var base = ch_data_json.root.object;
-            var status = base.get("result").?.string;
-            if(!std.mem.eql(u8, status, "ok")) {
-                return error.Request;
-            }
-            self.chapter_data.base_url = base.get("baseUrl").?.string;
-            var ch = base.get("chapter").?.object;
-            self.chapter_data.hash = ch.get("hash").?.string;
-            self.chapter_data.data = &(ch.get("data").?.array);
-            self.chapter_data.data_saver = &(ch.get("dataSaver").?.array);
-        }
+        self.chapter_buf = try req.reader().readAllAlloc(self.allocator, 10_000);
+        self.chapter_data = try std.json.parseFromSlice(ChapterData, self.allocator, self.chapter_buf, .{});
     }
 
     fn downloadAllPagesOfType(
-        self: *Self, iter: *const std.ArrayList(std.json.Value), base: []const u8, hash: []const u8,
+        self: *Self, iter: [][]const u8, base: []const u8, hash: []const u8,
         data: []const u8, range: ?std.meta.Tuple(&.{ u32, u32 }),
         comptime dw_start_callback: fn(fname: []const u8) anyerror!void,
         comptime dw_end_callback: fn() anyerror!void,
     ) !void {
         if(range != null) {
-            if(range.?.@"1" + 1 > iter.items.len) {
+            if(range.?.@"1" + 1 > iter.len) {
                 return error.InvalidRange;
             }
             for(range.?.@"0"..range.?.@"1" + 1) |i| {
-                // Uncomment the next line if in debug mode or else it will segfault
-                // std.debug.print("{any}\n", .{ iter.items[i] });
-                var fname = iter.items[i].string;
+                var fname = iter[i];
                 if(self.file_name != null) {
                     fname = try std.fmt.allocPrint(self.allocator, "{s}{d:0>2}{s}", .{
-                        self.file_name.?, i + 1, extractFileExtension(iter.items[i].string)
+                        self.file_name.?, i + 1, extractFileExtension(iter[i])
                     });
                 }
                 try dw_start_callback(fname);
                 var page_link = try std.mem.concat(self.allocator, u8, &.{
-                    base, "/", data ,"/", hash, "/", iter.items[i].string
+                    base, "/", data ,"/", hash, "/", iter[i]
                 });
                 defer self.allocator.free(page_link);
                 try self.downloadPage(page_link, fname);
@@ -132,16 +122,16 @@ pub const Client = struct {
             }
         } else {
             var idx: usize = 1;
-            for(iter.items) |l| {
-                var fname = l.string;
+            for(iter) |l| {
+                var fname = l;
                 if(self.file_name != null) {
                     fname = try std.fmt.allocPrint(self.allocator, "{s}{d:0>2}{s}", .{
-                        self.file_name.?, idx, extractFileExtension(l.string)
+                        self.file_name.?, idx, extractFileExtension(l)
                     });
                 }
                 try dw_start_callback(fname);
                 var page_link = try std.mem.concat(self.allocator, u8, &.{
-                    base, "/", data ,"/", hash, "/", l.string
+                    base, "/", data ,"/", hash, "/", l
                 });
                 defer self.allocator.free(page_link);
                 try self.downloadPage(page_link, fname);

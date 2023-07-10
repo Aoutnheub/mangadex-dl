@@ -147,15 +147,15 @@ pub fn main() !void {
     // Print links if enabled
     if(runtime_opts.print_links) {
         if(runtime_opts.data_saver) {
-            for(client.chapter_data.data_saver.items) |l| {
+            for(client.chapter_data.?.value.chapter.dataSaver) |l| {
                 try stdout.print("{s}/data-saver/{s}/{s}\n", .{
-                    client.chapter_data.base_url, client.chapter_data.hash, l.string
+                    client.chapter_data.?.value.baseUrl, client.chapter_data.?.value.chapter.hash, l
                 });
             }
         } else {
-            for(client.chapter_data.data.items) |l| {
+            for(client.chapter_data.?.value.chapter.data) |l| {
                 try stdout.print("{s}/data/{s}/{s}\n", .{
-                    client.chapter_data.base_url, client.chapter_data.hash, l.string
+                    client.chapter_data.?.value.baseUrl, client.chapter_data.?.value.chapter.hash, l
                 });
             }
         }
