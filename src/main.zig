@@ -5,6 +5,7 @@ const args = @import("./args.zig");
 const Client = @import("./client.zig").Client;
 
 const stdout = std.io.getStdOut().writer();
+const stdin = std.io.getStdIn().reader();
 const stderr = std.io.getStdErr().writer();
 const version = "v1.1";
 
@@ -25,15 +26,49 @@ fn printError(comptime fmt: []const u8, _args: anytype) !void {
     try stderr.print(fmt ++ "\n", _args);
 }
 
+fn iWarn(msg: []const u8, opts: []const u8) !u8 {
+    if(runtime_opts.color) {
+        try stdout.print("[{s}Warning{s}] {s} [", .{ args.ANSIYellow, "\x1b[0m", msg });
+    } else {
+        try stdout.print("[Warning] {s} [", .{ msg });
+    }
+    for(opts, 0..) |o, i| {
+        try stdout.writeByte(o);
+        if(i != opts.len - 1) { try stdout.writeByte('/'); }
+    }
+    try stdout.print("] ", .{});
+    var b = try stdin.readByte();
+    try stdin.skipUntilDelimiterOrEof('\n');
+
+    return b;
+}
+
 fn onStartPageDw(fname: []const u8) !void {
     try stdout.print("Downloading page {s}... ", .{ fname });
 }
 
 fn onEndPageDw() !void {
     if(runtime_opts.color) {
-        try stdout.print("{s}Done\x1b[0m\n", .{ args.ANSIGreen });
+        try stdout.print("{s}Done{s}\n", .{ args.ANSIGreen, "\x1b[0m" });
     } else {
         try stdout.print("Done\n", .{});
+    }
+}
+
+fn onFileOverwrite(fname: []const u8) !bool {
+    var msg = try std.fmt.allocPrint(
+        std.heap.page_allocator, "File \"{s}\" already exists. Overwrite it?", .{ fname }
+    );
+    defer std.heap.page_allocator.free(msg);
+    while(true) {
+        var res = try iWarn(msg, "yn");
+        switch(res) {
+            'y' => return true,
+            'n' => return false,
+            else => {
+                try printError("Invalid option {s}\n", .{ [_]u8{res} });
+            }
+        }
     }
 }
 
@@ -170,8 +205,8 @@ pub fn main() !void {
 
     // Download pages
     if(runtime_opts.data_saver) {
-        try client.downloadAllPagesDS(runtime_opts.range, onStartPageDw, onEndPageDw);
+        try client.downloadAllPagesDS(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
     } else {
-        try client.downloadAllPages(runtime_opts.range, onStartPageDw, onEndPageDw);
+        try client.downloadAllPages(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
     }
 }

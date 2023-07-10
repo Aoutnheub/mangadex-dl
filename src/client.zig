@@ -55,12 +55,14 @@ pub const Client = struct {
         self: *Self, range: ?std.meta.Tuple(&.{ u32, u32 }),
         comptime dw_start_callback: fn(fname: []const u8) anyerror!void,
         comptime dw_end_callback: fn() anyerror!void,
+        comptime overwrite_callback: fn([]const u8) anyerror!bool
     ) !void {
         try self.downloadAllPagesOfType(
             self.chapter_data.?.value.chapter.data,
             self.chapter_data.?.value.baseUrl,
             self.chapter_data.?.value.chapter.hash,
-            "data", range, dw_start_callback, dw_end_callback
+            "data", range,
+            dw_start_callback, dw_end_callback, overwrite_callback
         );
     }
 
@@ -68,12 +70,14 @@ pub const Client = struct {
         self: *Self, range: ?std.meta.Tuple(&.{ u32, u32 }),
         comptime dw_start_callback: fn(fname: []const u8) anyerror!void,
         comptime dw_end_callback: fn() anyerror!void,
+        comptime overwrite_callback: fn([]const u8) anyerror!bool
     ) !void {
         try self.downloadAllPagesOfType(
             self.chapter_data.?.value.chapter.dataSaver,
             self.chapter_data.?.value.baseUrl,
             self.chapter_data.?.value.chapter.hash,
-            "data-saver", range, dw_start_callback, dw_end_callback
+            "data-saver", range,
+            dw_start_callback, dw_end_callback, overwrite_callback
         );
     }
 
@@ -97,18 +101,38 @@ pub const Client = struct {
         data: []const u8, range: ?std.meta.Tuple(&.{ u32, u32 }),
         comptime dw_start_callback: fn(fname: []const u8) anyerror!void,
         comptime dw_end_callback: fn() anyerror!void,
+        comptime overwrite_callback: fn([]const u8) anyerror!bool
     ) !void {
+        var rstart: usize = 0;
+        var rend: usize = iter.len;
         if(range != null) {
             if(range.?.@"1" + 1 > iter.len) {
                 return error.InvalidRange;
             }
-            for(range.?.@"0"..range.?.@"1" + 1) |i| {
-                var fname = iter[i];
-                if(self.file_name != null) {
-                    fname = try std.fmt.allocPrint(self.allocator, "{s}{d:0>2}{s}", .{
-                        self.file_name.?, i + 1, extractFileExtension(iter[i])
-                    });
+            rstart = range.?.@"0";
+            rend = range.?.@"1" + 1;
+        }
+        for(rstart..rend) |i| {
+            var fname = iter[i];
+            if(self.file_name != null) {
+                fname = try std.fmt.allocPrint(self.allocator, "{s}{d:0>2}{s}", .{
+                    self.file_name.?, i + 1, extractFileExtension(iter[i])
+                });
+            }
+
+            // Check if file exists and prompt user
+            var cwd = std.fs.cwd();
+            var file_exists = true;
+            _ = cwd.statFile(fname) catch |err| {
+                switch(err) {
+                    error.FileNotFound => file_exists = false,
+                    else => return err
                 }
+            };
+            var overwrite = false;
+            if(file_exists) { overwrite = try overwrite_callback(fname); }
+
+            if(overwrite) {
                 try dw_start_callback(fname);
                 var page_link = try std.mem.concat(self.allocator, u8, &.{
                     base, "/", data ,"/", hash, "/", iter[i]
@@ -116,30 +140,9 @@ pub const Client = struct {
                 defer self.allocator.free(page_link);
                 try self.downloadPage(page_link, fname);
                 try dw_end_callback();
-                if(self.file_name != null) {
-                    self.allocator.free(fname);
-                }
             }
-        } else {
-            var idx: usize = 1;
-            for(iter) |l| {
-                var fname = l;
-                if(self.file_name != null) {
-                    fname = try std.fmt.allocPrint(self.allocator, "{s}{d:0>2}{s}", .{
-                        self.file_name.?, idx, extractFileExtension(l)
-                    });
-                }
-                try dw_start_callback(fname);
-                var page_link = try std.mem.concat(self.allocator, u8, &.{
-                    base, "/", data ,"/", hash, "/", l
-                });
-                defer self.allocator.free(page_link);
-                try self.downloadPage(page_link, fname);
-                try dw_end_callback();
-                if(self.file_name != null) {
-                    self.allocator.free(fname);
-                }
-                idx += 1;
+            if(self.file_name != null) {
+                self.allocator.free(fname);
             }
         }
     }
