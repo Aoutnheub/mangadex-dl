@@ -1,4 +1,5 @@
 const std = @import("std");
+const args = @import("./args.zig");
 
 pub const ChapterData = struct {
     result: []const u8 = undefined,
@@ -10,7 +11,7 @@ pub const ChapterData = struct {
     } = undefined
 };
 
-pub const Client = struct {
+pub const DownloadClient = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
@@ -36,7 +37,7 @@ pub const Client = struct {
         if(self.chapter_data) |cd| { cd.deinit(); }
     }
 
-    pub fn downloadPage(self: *Client, link: []const u8, file_name: []const u8) !void {
+    pub fn downloadPage(self: *Self, link: []const u8, file_name: []const u8) !void {
         var file = try std.fs.cwd().createFile(file_name, .{ .truncate = true });
         defer file.close();
 
@@ -85,7 +86,7 @@ pub const Client = struct {
         return s[std.mem.lastIndexOf(u8, s, ".").?..];
     }
 
-    fn getChapterData(self: *Client, link: []const u8) !void {
+    fn getChapterData(self: *Self, link: []const u8) !void {
         var req = try self.client.request(
             .GET, try std.Uri.parse(link), .{ .allocator = self.allocator }, .{}
         );
@@ -147,3 +148,189 @@ pub const Client = struct {
         }
     }
 };
+
+pub const SearchDataEntryRel = struct {
+    id: []const u8,
+    @"type": []const u8,
+    related: ?[]const u8
+};
+
+pub const SearchDataEntryTag = struct {
+    id: []const u8,
+    @"type": []const u8,
+    attributes: struct {
+        name: struct {
+            en: []const u8
+        },
+        // description: -
+        group: []const u8,
+        version: u32
+    }
+    // relationships: []SearchDataEntryRel
+};
+
+pub const SearchDataEntry = struct {
+    id: []const u8,
+    @"type": []const u8,
+    attributes: struct {
+        title: struct {
+            en: []const u8
+        },
+        // altTitles: -
+        description: std.json.Value, // Object but sometimes empty
+        isLocked: bool,
+        // links: -
+        originalLanguage: []const u8,
+        lastVolume: ?[]const u8,
+        lastChapter: ?[]const u8,
+        publicationDemographic: ?[]const u8,
+        status: []const u8,
+        year: ?u32,
+        contentRating: []const u8,
+        tags: []SearchDataEntryTag,
+        state: []const u8,
+        chapterNumbersResetOnNewVolume: bool,
+        createdAt: []const u8,
+        updatedAt: []const u8,
+        version: u32,
+        availableTranslatedLanguages: [][]const u8,
+        latestUploadedChapter: ?[]const u8,
+    },
+    // relationships: []SearchDataEntryRel
+};
+
+pub const SearchData = struct {
+    result: []const u8,
+    response: []const u8,
+    data: []SearchDataEntry,
+    limit: u32,
+    offset: u32,
+    total: u32
+};
+
+pub const SearchResults = struct {
+    const Self = @This();
+
+    _buf: []u8,
+    allocator: std.mem.Allocator,
+    data: std.json.Parsed(SearchData),
+
+    pub fn deinit(self: *Self) void {
+        self.data.deinit();
+        self.allocator.free(self._buf);
+    }
+
+    pub fn printr(self: *Self, start: usize, end: usize) !void {
+        var bufw = std.io.bufferedWriter(std.io.getStdIn().writer());
+        var stdout = bufw.writer();
+        for(start..end) |i| {
+            // Title, id
+            try stdout.print("\n{s} ({s})\n", .{
+                self.data.value.data[i].attributes.title.en, self.data.value.data[i].id
+            });
+            // Status, year, last volume, last chapter
+            try stdout.print(
+                "Status: {s} Published: {?} Last volume: {s} Last chapter: {s}\n",
+                .{
+                    self.data.value.data[i].attributes.status,
+                    self.data.value.data[i].attributes.year,
+                    if(self.data.value.data[i].attributes.lastVolume) |s| s else "?",
+                    if(self.data.value.data[i].attributes.lastChapter) |s| s else "?"
+                }
+            );
+            // Tags
+            try stdout.print("Tags: ", .{});
+            for(self.data.value.data[i].attributes.tags) |t| {
+                try stdout.print("[{s}]", .{ t.attributes.name.en });
+                try stdout.writeByte(' ');
+            }
+            try stdout.writeByte('\n');
+            // Languages
+            _ = try stdout.write("Languages: ");
+            for(self.data.value.data[i].attributes.availableTranslatedLanguages) |lang| {
+                _ = try stdout.write(lang);
+                try stdout.writeByte(' ');
+            }
+            _ = try stdout.write("\n\n");
+            // Description
+            _ = try stdout.write(
+                if(self.data.value.data[i].attributes.description.object.get("en")) |s| s.string else "No description"
+            );
+            _ = try stdout.write("\n\n");
+            try bufw.flush();
+        }
+    }
+
+    pub fn printrColor(self: *Self, start: usize, end: usize) !void {
+        var bufw = std.io.bufferedWriter(std.io.getStdIn().writer());
+        var stdout = bufw.writer();
+        for(start..end) |i| {
+            // Title, id
+            try stdout.print("\n{s}{s}{s} {s}({s}){s}\n", .{
+                args.ANSIGreen, self.data.value.data[i].attributes.title.en, "\x1b[0m",
+                args.ANSIBlack, self.data.value.data[i].id, "\x1b[0m"
+            });
+            // Status, year, last volume, last chapter
+            try stdout.print(
+                "Status: {s}{s}{s} Published: {s}{?}{s} Last volume: {s}{s}{s} Last chapter: {s}{s}{s}\n",
+                .{
+                    args.ANSIBlue, self.data.value.data[i].attributes.status, "\x1b[0m",
+                    args.ANSIBlue, self.data.value.data[i].attributes.year, "\x1b[0m",
+                    args.ANSIBlue, if(self.data.value.data[i].attributes.lastVolume) |s| s else "?", "\x1b[0m",
+                    args.ANSIBlue, if(self.data.value.data[i].attributes.lastChapter) |s| s else "?", "\x1b[0m"
+                }
+            );
+            // Tags
+            try stdout.print("Tags: ", .{});
+            for(self.data.value.data[i].attributes.tags) |t| {
+                try stdout.print("[{s}{s}{s}]", .{ args.ANSIYellow, t.attributes.name.en, "\x1b[0m" });
+                try stdout.writeByte(' ');
+            }
+            _ = try stdout.write("\x1b[0m\n");
+            // Languages
+            try stdout.print("Languages: {s}", .{ args.ANSIMagenta });
+            for(self.data.value.data[i].attributes.availableTranslatedLanguages) |lang| {
+                _ = try stdout.write(lang);
+                try stdout.writeByte(' ');
+            }
+            _ = try stdout.write("\x1b[0m\n\n");
+            // Description
+            _ = try stdout.write(
+                if(self.data.value.data[i].attributes.description.object.get("en")) |s| s.string else "No description"
+            );
+            _ = try stdout.write("\n\n");
+            try bufw.flush();
+        }
+    }
+
+    pub fn print(self: *Self, color: bool) !void {
+        if(color) {
+            try self.printrColor(0, self.data.value.data.len);
+        } else {
+            try self.printr(0, self.data.value.data.len);
+        }
+    }
+};
+
+pub fn searchManga(title: []const u8, allocator: std.mem.Allocator) !SearchResults {
+    var client = std.http.Client{ .allocator = allocator };
+    var link = try std.fmt.allocPrint(allocator, "https://api.mangadex.org/manga?title={s}", .{ title });
+    defer allocator.free(link);
+    var req = try client.request(
+        .GET, try std.Uri.parse(link), .{ .allocator = allocator }, .{}
+    );
+    defer req.deinit();
+    try req.start();
+    try req.wait();
+
+    var buf = try req.reader().readAllAlloc(allocator, 10_000_000);
+    var parsed = try std.json.parseFromSlice(SearchData, allocator, buf, .{
+        .ignore_unknown_fields = true
+    });
+
+    return SearchResults {
+        ._buf = buf,
+        .allocator = allocator,
+        .data = parsed
+    };
+}

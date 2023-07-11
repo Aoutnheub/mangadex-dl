@@ -2,12 +2,13 @@ const std = @import("std");
 const builtin = @import("builtin");
 const args = @import("./args.zig");
 
-const Client = @import("./client.zig").Client;
+const DownloadClient = @import("./client.zig").DownloadClient;
+const searchManga = @import("./client.zig").searchManga;
 
 const stdout = std.io.getStdOut().writer();
 const stdin = std.io.getStdIn().reader();
 const stderr = std.io.getStdErr().writer();
-const version = "v1.1";
+const version = "1.2";
 
 var runtime_opts: struct {
     print_links: bool = false,
@@ -101,6 +102,7 @@ pub fn main() !void {
     try parser.addFlag("print-links", "Print the links to all the pages without downloading any", 'l');
     try parser.addFlag("color", "Toggle colored output. Enabled by default if not on Windows", null);
     try parser.addFlag("data-saver", "Download compressed images. Smaller size, less quality", 's');
+    try parser.addFlag("search", "Search for a manga", null);
     // Options
     try parser.addOption(
         "range",
@@ -134,6 +136,9 @@ pub fn main() !void {
 
     // Set runtime options
     if(results.flag) |flag| {
+        if(flag.get("color") != null) {
+            runtime_opts.color = !runtime_opts.color;
+        }
         if(flag.get("help") != null) {
             try parser.help();
             std.process.exit(0);
@@ -142,11 +147,21 @@ pub fn main() !void {
             try stdout.print("Version " ++ version ++ "\n", .{});
             std.process.exit(0);
         }
+        if(flag.get("search") != null) {
+            if(results.positional) |pos| {
+                var title = try std.mem.join(std.heap.page_allocator, " ", pos.items);
+                defer std.heap.page_allocator.free(title);
+                var res = try searchManga(title, std.heap.page_allocator);
+                defer res.deinit();
+                try res.print(runtime_opts.color);
+                std.os.exit(0);
+            } else {
+                try printError("Nothing to search for", .{});
+                std.os.exit(1);
+            }
+        }
         if(flag.get("print-links") != null) {
             runtime_opts.print_links = true;
-        }
-        if(flag.get("color") != null) {
-            runtime_opts.color = !runtime_opts.color;
         }
         if(flag.get("data-saver") != null) {
             runtime_opts.data_saver = true;
@@ -181,22 +196,22 @@ pub fn main() !void {
         try printError("Missing chapter id", .{});
         std.process.exit(1);
     }
-    var client = try Client.init(std.heap.page_allocator, link);
-    client.file_name = runtime_opts.name;
-    defer client.deinit();
+    var dclient = try DownloadClient.init(std.heap.page_allocator, link);
+    dclient.file_name = runtime_opts.name;
+    defer dclient.deinit();
 
     // Print links if enabled
     if(runtime_opts.print_links) {
         if(runtime_opts.data_saver) {
-            for(client.chapter_data.?.value.chapter.dataSaver) |l| {
+            for(dclient.chapter_data.?.value.chapter.dataSaver) |l| {
                 try stdout.print("{s}/data-saver/{s}/{s}\n", .{
-                    client.chapter_data.?.value.baseUrl, client.chapter_data.?.value.chapter.hash, l
+                    dclient.chapter_data.?.value.baseUrl, dclient.chapter_data.?.value.chapter.hash, l
                 });
             }
         } else {
-            for(client.chapter_data.?.value.chapter.data) |l| {
+            for(dclient.chapter_data.?.value.chapter.data) |l| {
                 try stdout.print("{s}/data/{s}/{s}\n", .{
-                    client.chapter_data.?.value.baseUrl, client.chapter_data.?.value.chapter.hash, l
+                    dclient.chapter_data.?.value.baseUrl, dclient.chapter_data.?.value.chapter.hash, l
                 });
             }
         }
@@ -205,8 +220,8 @@ pub fn main() !void {
 
     // Download pages
     if(runtime_opts.data_saver) {
-        try client.downloadAllPagesDS(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
+        try dclient.downloadAllPagesDS(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
     } else {
-        try client.downloadAllPages(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
+        try dclient.downloadAllPages(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
     }
 }
