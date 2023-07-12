@@ -1,4 +1,4 @@
-CLI utility for downloading chapters from mangadex
+CLI utility for browsing / downloading from mangadex
 
 ### Build from source
 
@@ -11,7 +11,22 @@ zig build -Doptimize=ReleaseSafe
 ### Usage
 
 ```sh
-mangadex-dl [OPTIONS] <CHAPTER_LINK>
+mangadex-dl [OPTIONS] <ARGUMENTS>
 ```
 
-`mangadex-dl -h` to see all options
+Use `mangadex-dl -h` to see all options
+
+#### Examples
+
+- Download chapter
+    ```sh
+    mangadex-dl <CHAPTER_LINK>
+    ```
+- Search for manga
+    ```sh
+    mangadex-dl --search <TITLE>
+    ```
+- Read chapter (with feh) without downloading
+    ```sh
+    mangadex-dl -l <CHAPTER_LINK> > /tmp/links.txt && feh -Z --scale-down -f /tmp/links.txt
+    ```
