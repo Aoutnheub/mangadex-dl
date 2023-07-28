@@ -2,6 +2,7 @@
 
 - Range improvements (use "n" to specify the end)
 - Added "first" option
+- Added ability to download covers
 
 ## Version 1.3
 

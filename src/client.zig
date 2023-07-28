@@ -82,7 +82,7 @@ pub const DownloadClient = struct {
         );
     }
 
-    fn extractFileExtension(s: []const u8) []const u8 {
+    pub fn extractFileExtension(s: []const u8) []const u8 {
         return s[std.mem.lastIndexOf(u8, s, ".").?..];
     }
 
@@ -146,45 +146,67 @@ pub const DownloadClient = struct {
     }
 };
 
+pub const MangaData = struct {
+    id: []const u8,
+    @"type": []const u8,
+    attributes: struct {
+        title: struct {
+            en: []const u8
+        },
+        description: std.json.Value, // Object but sometimes empty
+        isLocked: bool,
+        originalLanguage: []const u8,
+        lastVolume: ?[]const u8,
+        lastChapter: ?[]const u8,
+        publicationDemographic: ?[]const u8,
+        status: []const u8,
+        year: ?u32,
+        contentRating: []const u8,
+        tags: []struct {
+            id: []const u8,
+            @"type": []const u8,
+            attributes: struct {
+                name: struct {
+                    en: []const u8
+                },
+                group: []const u8,
+                version: u32
+            }
+        },
+        state: []const u8,
+        chapterNumbersResetOnNewVolume: bool,
+        createdAt: []const u8,
+        updatedAt: []const u8,
+        version: u32,
+        availableTranslatedLanguages: [][]const u8,
+        latestUploadedChapter: ?[]const u8,
+    },
+    relationships: []std.json.Value
+};
+
+pub const MangaRes = struct {
+    result: []const u8,
+    response: []const u8,
+    data: MangaData
+};
+
+pub const Manga = struct {
+    const Self = @This();
+
+    _buf: []u8,
+    allocator: std.mem.Allocator,
+    data: std.json.Parsed(MangaRes),
+
+    pub fn deinit(self: *Self) void {
+        self.data.deinit();
+        self.allocator.free(self._buf);
+    }
+};
+
 pub const MangaSearchData = struct {
     result: []const u8,
     response: []const u8,
-    data: []struct {
-        id: []const u8,
-        @"type": []const u8,
-        attributes: struct {
-            title: struct {
-                en: []const u8
-            },
-            description: std.json.Value, // Object but sometimes empty
-            isLocked: bool,
-            originalLanguage: []const u8,
-            lastVolume: ?[]const u8,
-            lastChapter: ?[]const u8,
-            publicationDemographic: ?[]const u8,
-            status: []const u8,
-            year: ?u32,
-            contentRating: []const u8,
-            tags: []struct {
-                id: []const u8,
-                @"type": []const u8,
-                attributes: struct {
-                    name: struct {
-                        en: []const u8
-                    },
-                    group: []const u8,
-                    version: u32
-                }
-            },
-            state: []const u8,
-            chapterNumbersResetOnNewVolume: bool,
-            createdAt: []const u8,
-            updatedAt: []const u8,
-            version: u32,
-            availableTranslatedLanguages: [][]const u8,
-            latestUploadedChapter: ?[]const u8,
-        },
-    },
+    data: []MangaData,
     limit: u32,
     offset: u32,
     total: u32
@@ -311,6 +333,33 @@ pub fn searchManga(title: []const u8, allocator: std.mem.Allocator) !MangaSearch
     });
 
     return MangaSearchResults {
+        ._buf = buf,
+        .allocator = allocator,
+        .data = parsed
+    };
+}
+
+pub fn getManga(id: []const u8, allocator: std.mem.Allocator) !Manga {
+    var client = std.http.Client{ .allocator = allocator };
+    var link = try std.fmt.allocPrint(
+        allocator,
+        "https://api.mangadex.org/manga/{s}?includes[]=author&includes[]=artist&includes[]=cover_art",
+        .{ id }
+    );
+    defer allocator.free(link);
+    var req = try client.request(
+        .GET, try std.Uri.parse(link), .{ .allocator = allocator }, .{}
+    );
+    defer req.deinit();
+    try req.start();
+    try req.wait();
+
+    var buf = try req.reader().readAllAlloc(allocator, 10_000_000);
+    var parsed = try std.json.parseFromSlice(MangaRes, allocator, buf, .{
+        .ignore_unknown_fields = true
+    });
+
+    return Manga {
         ._buf = buf,
         .allocator = allocator,
         .data = parsed

@@ -5,11 +5,12 @@ const args = @import("./args.zig");
 const DownloadClient = @import("./client.zig").DownloadClient;
 const searchManga = @import("./client.zig").searchManga;
 const getMangaVolCh = @import("./client.zig").getMangaVolCh;
+const getManga = @import("./client.zig").getManga;
 
 const stdout = std.io.getStdOut().writer();
 const stdin = std.io.getStdIn().reader();
 const stderr = std.io.getStdErr().writer();
-const version = "1.3";
+const version = "1.4";
 
 const Action = enum {
     PrintHelp,
@@ -17,7 +18,8 @@ const Action = enum {
     DownloadChapter,
     PrintChapterLinks,
     SearchManga,
-    PrintVolCh
+    PrintVolCh,
+    DownloadCover
 };
 
 var runtime_opts: struct {
@@ -133,6 +135,7 @@ pub fn main() !void {
     try parser.addFlag("data-saver", "Download compressed images. Smaller size, less quality", 's');
     try parser.addFlag("search", "Search for a manga", 'S');
     try parser.addFlag("volch", "Print volumes and chapters of manga", 'C');
+    try parser.addFlag("cover", "Get the cover of a manga", null);
     // Options
     try parser.addOption(
         "range",
@@ -180,6 +183,7 @@ pub fn main() !void {
         if(flag.get("search") != null) { runtime_opts.action = .SearchManga; }
         if(flag.get("volch") != null) { runtime_opts.action = .PrintVolCh; }
         if(flag.get("print-links") != null) { runtime_opts.action = .PrintChapterLinks; }
+        if(flag.get("cover") != null) { runtime_opts.action = .DownloadCover; }
         if(flag.get("data-saver") != null) { runtime_opts.data_saver = true; }
     }
     if(results.option) |option| {
@@ -286,6 +290,43 @@ pub fn main() !void {
             } else {
                 try printError("Nothing to search for", .{});
                 std.os.exit(1);
+            }
+        },
+        .DownloadCover => {
+            if(results.positional) |pos| {
+                var res = try getManga(pos.items[0], std.heap.page_allocator);
+                defer res.deinit();
+                var cover_id: []const u8 = undefined;
+                for(res.data.value.data.relationships) |rel| {
+                    if(
+                        std.mem.eql(u8, rel.object.get("type").?.string, "cover_art") and
+                        rel.object.get("attributes") != null
+                    ) {
+                        cover_id = rel.object.get("attributes").?.object.get("fileName").?.string;
+                    }
+                }
+
+                var ext = DownloadClient.extractFileExtension(cover_id);
+                var fname = try std.fmt.allocPrint(std.heap.page_allocator, "cover{s}", .{ ext });
+                defer std.heap.page_allocator.free(fname);
+                var link = try std.fmt.allocPrint(
+                    std.heap.page_allocator, "https://uploads.mangadex.org/covers/{s}/{s}",
+                    .{ pos.items[0], cover_id }
+                );
+                defer std.heap.page_allocator.free(link);
+                var file = try std.fs.cwd().createFile(fname, .{ .truncate = true });
+                defer file.close();
+
+                var client = std.http.Client{ .allocator = std.heap.page_allocator };
+                var req = try client.request(
+                    .GET, try std.Uri.parse(link), .{ .allocator = std.heap.page_allocator }, .{}
+                );
+                try req.start();
+                try req.wait();
+
+                var buf = try req.reader().readAllAlloc(std.heap.page_allocator, 10_000_000);
+                defer std.heap.page_allocator.free(buf);
+                try file.writeAll(buf);
             }
         },
         .PrintVolCh => {
