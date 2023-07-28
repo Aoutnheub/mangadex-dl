@@ -227,41 +227,28 @@ pub fn main() !void {
 
             // Print links if enabled
             if(runtime_opts.action == .PrintChapterLinks) {
-                // TODO : Rewrite this in a less sucky way
+                var iter: [][]const u8 = undefined;
                 if(runtime_opts.data_saver) {
-                    var start: usize = 0;
-                    var end: usize = dclient.chapter_data.?.value.chapter.dataSaver.len;
-                    if(runtime_opts.range) |r| {
-                        start = r.@"0";
-                        if(r.@"1" > end) {
-                            try printError("Range end too big", .{});
-                            std.process.exit(1);
-                        }
-                        end = r.@"1";
-                    }
-                    for(start..end) |i| {
-                        try stdout.print("{s}/data-saver/{s}/{s}\n", .{
-                            dclient.chapter_data.?.value.baseUrl, dclient.chapter_data.?.value.chapter.hash,
-                            dclient.chapter_data.?.value.chapter.dataSaver[i]
-                        });
-                    }
+                    iter = dclient.chapter_data.?.value.chapter.dataSaver;
                 } else {
-                    var start: usize = 0;
-                    var end: usize = dclient.chapter_data.?.value.chapter.data.len;
-                    if(runtime_opts.range) |r| {
-                        start = r.@"0";
-                        if(r.@"1" > end) {
-                            try printError("Range end too big", .{});
-                            std.process.exit(1);
-                        }
-                        end = r.@"1";
+                    iter = dclient.chapter_data.?.value.chapter.data;
+                }
+                var start: usize = 0;
+                var end: usize = iter.len;
+                if(runtime_opts.range) |r| {
+                    start = r.@"0";
+                    if(r.@"1" > end) {
+                        try printError("Range end too big", .{});
+                        std.process.exit(1);
                     }
-                    for(start..end) |i| {
-                        try stdout.print("{s}/data/{s}/{s}\n", .{
-                            dclient.chapter_data.?.value.baseUrl, dclient.chapter_data.?.value.chapter.hash,
-                            dclient.chapter_data.?.value.chapter.data[i]
-                        });
-                    }
+                    end = r.@"1";
+                }
+                for(start..end) |i| {
+                    try stdout.print("{s}/{s}/{s}/{s}\n", .{
+                        dclient.chapter_data.?.value.baseUrl,
+                        if(runtime_opts.data_saver) "data-saver" else "data",
+                        dclient.chapter_data.?.value.chapter.hash, iter[i]
+                    });
                 }
                 std.process.exit(0);
             } else {
