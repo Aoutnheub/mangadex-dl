@@ -1,4 +1,10 @@
-CLI utility for browsing / downloading from mangadex
+<div align="center">
+![Banner](banner.svg)
+![Version](https://img.shields.io/github/v/release/Aoutnheub/mangadex-dl?style=for-the-badge&label=Version)
+![License](https://img.shields.io/github/license/Aoutnheub/mangadex-dl?style=for-the-badge&label=License)
+
+CLI utility for browsing and downloading from Mangadex
+</div>
 
 ### Build from source
 
