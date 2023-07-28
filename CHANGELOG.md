@@ -1,6 +1,7 @@
 ## Version 1.4
 
 - Range improvements (use "n" to specify the end)
+- Added "first" option
 
 ## Version 1.3
 

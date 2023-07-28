@@ -141,7 +141,8 @@ pub fn main() !void {
         \\    "mangadex-dl --search <TITLE> -r 1-2" will only show the first 2 results.
         , 'r', null, null
     );
-    try parser.addOption("name", "Name of the downloaded images excluding file extension", 'n', null, null);
+    try parser.addOption("output", "Name of the downloaded images excluding file extension", 'o', null, null);
+    try parser.addOption("first", "Select the first n items. Equivalent to \"-r 1-<NUM>\"", 'n', null, null);
 
     // Parse arguments
     var raw_args = try std.process.argsAlloc(std.heap.page_allocator);
@@ -182,8 +183,16 @@ pub fn main() !void {
         if(flag.get("data-saver") != null) { runtime_opts.data_saver = true; }
     }
     if(results.option) |option| {
+        var first_opt = option.get("first");
+        if(first_opt) |fo| {
+            runtime_opts.range = .{ 0, try std.fmt.parseUnsigned(u32, fo, 10) };
+        }
         var range_opt = option.get("range");
         if(range_opt) |ro| {
+            if(runtime_opts.range != null) {
+                try printError("Incompatible options \"--first\" and \"--range\"", .{});
+                std.process.exit(1);
+            }
             runtime_opts.range = parseRange(ro) catch |err| {
                 switch(err) {
                     error.InvalidStart => {
