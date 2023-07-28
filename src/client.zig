@@ -1,7 +1,7 @@
 const std = @import("std");
 const args = @import("./args.zig");
 
-pub const ChapterData = struct {
+pub const ChapterRes = struct {
     result: []const u8 = undefined,
     baseUrl: []const u8 = undefined,
     chapter: struct {
@@ -11,13 +11,13 @@ pub const ChapterData = struct {
     } = undefined
 };
 
-pub const DownloadClient = struct {
+pub const ChapterDownloader = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
     client: std.http.Client,
     chapter_buf: []const u8,
-    chapter_data: ?std.json.Parsed(ChapterData) = null,
+    chapter_res: ?std.json.Parsed(ChapterRes) = null,
     file_name: ?[]const u8 = null,
 
     pub fn init(allocator: std.mem.Allocator, link: []const u8) !Self {
@@ -26,7 +26,7 @@ pub const DownloadClient = struct {
             .client = std.http.Client{ .allocator = allocator },
             .chapter_buf = try allocator.alloc(u8, 0)
         };
-        try client.getChapterData(link);
+        try client.getChapter(link);
 
         return client;
     }
@@ -34,7 +34,7 @@ pub const DownloadClient = struct {
     pub fn deinit(self: *Self) void {
         self.client.deinit();
         self.allocator.free(self.chapter_buf);
-        if(self.chapter_data) |cd| { cd.deinit(); }
+        if(self.chapter_res) |cd| { cd.deinit(); }
     }
 
     pub fn downloadPage(self: *Self, link: []const u8, file_name: []const u8) !void {
@@ -59,9 +59,9 @@ pub const DownloadClient = struct {
         comptime overwrite_callback: fn([]const u8) anyerror!bool
     ) !void {
         try self.downloadAllPagesOfType(
-            self.chapter_data.?.value.chapter.data,
-            self.chapter_data.?.value.baseUrl,
-            self.chapter_data.?.value.chapter.hash,
+            self.chapter_res.?.value.chapter.data,
+            self.chapter_res.?.value.baseUrl,
+            self.chapter_res.?.value.chapter.hash,
             "data", range,
             dw_start_callback, dw_end_callback, overwrite_callback
         );
@@ -74,19 +74,15 @@ pub const DownloadClient = struct {
         comptime overwrite_callback: fn([]const u8) anyerror!bool
     ) !void {
         try self.downloadAllPagesOfType(
-            self.chapter_data.?.value.chapter.dataSaver,
-            self.chapter_data.?.value.baseUrl,
-            self.chapter_data.?.value.chapter.hash,
+            self.chapter_res.?.value.chapter.dataSaver,
+            self.chapter_res.?.value.baseUrl,
+            self.chapter_res.?.value.chapter.hash,
             "data-saver", range,
             dw_start_callback, dw_end_callback, overwrite_callback
         );
     }
 
-    pub fn extractFileExtension(s: []const u8) []const u8 {
-        return s[std.mem.lastIndexOf(u8, s, ".").?..];
-    }
-
-    fn getChapterData(self: *Self, link: []const u8) !void {
+    fn getChapter(self: *Self, link: []const u8) !void {
         var req = try self.client.request(
             .GET, try std.Uri.parse(link), .{ .allocator = self.allocator }, .{}
         );
@@ -94,7 +90,7 @@ pub const DownloadClient = struct {
         try req.start();
         try req.wait();
         self.chapter_buf = try req.reader().readAllAlloc(self.allocator, 10_000);
-        self.chapter_data = try std.json.parseFromSlice(ChapterData, self.allocator, self.chapter_buf, .{});
+        self.chapter_res = try std.json.parseFromSlice(ChapterRes, self.allocator, self.chapter_buf, .{});
     }
 
     fn downloadAllPagesOfType(
@@ -114,7 +110,7 @@ pub const DownloadClient = struct {
             var fname = iter[i];
             if(self.file_name != null) {
                 fname = try std.fmt.allocPrint(self.allocator, "{s}{d:0>2}{s}", .{
-                    self.file_name.?, i + 1, extractFileExtension(iter[i])
+                    self.file_name.?, i + 1, std.fs.path.extension(iter[i])
                 });
             }
 
@@ -195,149 +191,13 @@ pub const Manga = struct {
 
     _buf: []u8,
     allocator: std.mem.Allocator,
-    data: std.json.Parsed(MangaRes),
+    res: std.json.Parsed(MangaRes),
 
     pub fn deinit(self: *Self) void {
-        self.data.deinit();
+        self.res.deinit();
         self.allocator.free(self._buf);
     }
 };
-
-pub const MangaSearchData = struct {
-    result: []const u8,
-    response: []const u8,
-    data: []MangaData,
-    limit: u32,
-    offset: u32,
-    total: u32
-};
-
-pub const MangaSearchResults = struct {
-    const Self = @This();
-
-    _buf: []u8,
-    allocator: std.mem.Allocator,
-    data: std.json.Parsed(MangaSearchData),
-
-    pub fn deinit(self: *Self) void {
-        self.data.deinit();
-        self.allocator.free(self._buf);
-    }
-
-    pub fn printr(self: *Self, start: usize, end: usize) !void {
-        var bufw = std.io.bufferedWriter(std.io.getStdIn().writer());
-        var stdout = bufw.writer();
-        for(start..end) |i| {
-            // Title, id
-            try stdout.print("\n{s} ({s})\n", .{
-                self.data.value.data[i].attributes.title.en, self.data.value.data[i].id
-            });
-            // Status, year, last volume, last chapter
-            try stdout.print(
-                "Status: {s} Published: {?} Last volume: {s} Last chapter: {s}\n",
-                .{
-                    self.data.value.data[i].attributes.status,
-                    self.data.value.data[i].attributes.year,
-                    if(self.data.value.data[i].attributes.lastVolume) |s| s else "?",
-                    if(self.data.value.data[i].attributes.lastChapter) |s| s else "?"
-                }
-            );
-            // Tags
-            try stdout.print("Tags: ", .{});
-            for(self.data.value.data[i].attributes.tags) |t| {
-                try stdout.print("[{s}]", .{ t.attributes.name.en });
-                try stdout.writeByte(' ');
-            }
-            try stdout.writeByte('\n');
-            // Languages
-            _ = try stdout.write("Languages: ");
-            for(self.data.value.data[i].attributes.availableTranslatedLanguages) |lang| {
-                _ = try stdout.write(lang);
-                try stdout.writeByte(' ');
-            }
-            _ = try stdout.write("\n\n");
-            // Description
-            _ = try stdout.write(
-                if(self.data.value.data[i].attributes.description.object.get("en")) |s| s.string else "No description"
-            );
-            _ = try stdout.write("\n\n");
-            try bufw.flush();
-        }
-    }
-
-    pub fn printrColor(self: *Self, start: usize, end: usize) !void {
-        var bufw = std.io.bufferedWriter(std.io.getStdIn().writer());
-        var stdout = bufw.writer();
-        for(start..end) |i| {
-            // Title, id
-            try stdout.print("\n{s}{s}{s} {s}({s}){s}\n", .{
-                args.ANSIGreen, self.data.value.data[i].attributes.title.en, "\x1b[0m",
-                args.ANSIBlack, self.data.value.data[i].id, "\x1b[0m"
-            });
-            // Status, year, last volume, last chapter
-            try stdout.print(
-                "Status: {s}{s}{s} Published: {s}{?}{s} Last volume: {s}{s}{s} Last chapter: {s}{s}{s}\n",
-                .{
-                    args.ANSIBlue, self.data.value.data[i].attributes.status, "\x1b[0m",
-                    args.ANSIBlue, self.data.value.data[i].attributes.year, "\x1b[0m",
-                    args.ANSIBlue, if(self.data.value.data[i].attributes.lastVolume) |s| s else "?", "\x1b[0m",
-                    args.ANSIBlue, if(self.data.value.data[i].attributes.lastChapter) |s| s else "?", "\x1b[0m"
-                }
-            );
-            // Tags
-            try stdout.print("Tags: ", .{});
-            for(self.data.value.data[i].attributes.tags) |t| {
-                try stdout.print("[{s}{s}{s}]", .{ args.ANSIYellow, t.attributes.name.en, "\x1b[0m" });
-                try stdout.writeByte(' ');
-            }
-            _ = try stdout.write("\x1b[0m\n");
-            // Languages
-            try stdout.print("Languages: {s}", .{ args.ANSIMagenta });
-            for(self.data.value.data[i].attributes.availableTranslatedLanguages) |lang| {
-                _ = try stdout.write(lang);
-                try stdout.writeByte(' ');
-            }
-            _ = try stdout.write("\x1b[0m\n\n");
-            // Description
-            _ = try stdout.write(
-                if(self.data.value.data[i].attributes.description.object.get("en")) |s| s.string else "No description"
-            );
-            _ = try stdout.write("\n\n");
-            try bufw.flush();
-        }
-    }
-
-    pub fn print(self: *Self, color: bool) !void {
-        if(color) {
-            try self.printrColor(0, self.data.value.data.len);
-        } else {
-            try self.printr(0, self.data.value.data.len);
-        }
-    }
-};
-
-pub fn searchManga(title: []const u8, allocator: std.mem.Allocator) !MangaSearchResults {
-    var client = std.http.Client{ .allocator = allocator };
-    var link = try std.fmt.allocPrint(allocator, "https://api.mangadex.org/manga?title={s}", .{ title });
-    defer allocator.free(link);
-    var req = try client.request(
-        .GET, try std.Uri.parse(link), .{ .allocator = allocator }, .{}
-    );
-    defer req.deinit();
-    try req.start();
-    try req.wait();
-
-    var buf = try req.reader().readAllAlloc(allocator, 10_000_000);
-    var parsed = try std.json.parseFromSlice(MangaSearchData, allocator, buf, .{
-        .ignore_unknown_fields = true
-    });
-
-    return MangaSearchResults {
-        ._buf = buf,
-        .allocator = allocator,
-        .data = parsed
-    };
-}
 
 pub fn getManga(id: []const u8, allocator: std.mem.Allocator) !Manga {
     var client = std.http.Client{ .allocator = allocator };
@@ -362,7 +222,143 @@ pub fn getManga(id: []const u8, allocator: std.mem.Allocator) !Manga {
     return Manga {
         ._buf = buf,
         .allocator = allocator,
-        .data = parsed
+        .res = parsed
+    };
+}
+
+pub const MangaSearchRes = struct {
+    result: []const u8,
+    response: []const u8,
+    data: []MangaData,
+    limit: u32,
+    offset: u32,
+    total: u32
+};
+
+pub const MangaSearchResults = struct {
+    const Self = @This();
+
+    _buf: []u8,
+    allocator: std.mem.Allocator,
+    res: std.json.Parsed(MangaSearchRes),
+
+    pub fn deinit(self: *Self) void {
+        self.res.deinit();
+        self.allocator.free(self._buf);
+    }
+
+    pub fn printr(self: *Self, start: usize, end: usize) !void {
+        var bufw = std.io.bufferedWriter(std.io.getStdIn().writer());
+        var stdout = bufw.writer();
+        for(start..end) |i| {
+            // Title, id
+            try stdout.print("\n{s} ({s})\n", .{
+                self.res.value.data[i].attributes.title.en, self.res.value.data[i].id
+            });
+            // Status, year, last volume, last chapter
+            try stdout.print(
+                "Status: {s} Published: {?} Last volume: {s} Last chapter: {s}\n",
+                .{
+                    self.res.value.data[i].attributes.status,
+                    self.res.value.data[i].attributes.year,
+                    if(self.res.value.data[i].attributes.lastVolume) |s| s else "?",
+                    if(self.res.value.data[i].attributes.lastChapter) |s| s else "?"
+                }
+            );
+            // Tags
+            try stdout.print("Tags: ", .{});
+            for(self.res.value.data[i].attributes.tags) |t| {
+                try stdout.print("[{s}]", .{ t.attributes.name.en });
+                try stdout.writeByte(' ');
+            }
+            try stdout.writeByte('\n');
+            // Languages
+            _ = try stdout.write("Languages: ");
+            for(self.res.value.data[i].attributes.availableTranslatedLanguages) |lang| {
+                _ = try stdout.write(lang);
+                try stdout.writeByte(' ');
+            }
+            _ = try stdout.write("\n\n");
+            // Description
+            _ = try stdout.write(
+                if(self.res.value.data[i].attributes.description.object.get("en")) |s| s.string else "No description"
+            );
+            _ = try stdout.write("\n\n");
+            try bufw.flush();
+        }
+    }
+
+    pub fn printrColor(self: *Self, start: usize, end: usize) !void {
+        var bufw = std.io.bufferedWriter(std.io.getStdIn().writer());
+        var stdout = bufw.writer();
+        for(start..end) |i| {
+            // Title, id
+            try stdout.print("\n{s}{s}{s} {s}({s}){s}\n", .{
+                args.ANSIGreen, self.res.value.data[i].attributes.title.en, "\x1b[0m",
+                args.ANSIBlack, self.res.value.data[i].id, "\x1b[0m"
+            });
+            // Status, year, last volume, last chapter
+            try stdout.print(
+                "Status: {s}{s}{s} Published: {s}{?}{s} Last volume: {s}{s}{s} Last chapter: {s}{s}{s}\n",
+                .{
+                    args.ANSIBlue, self.res.value.data[i].attributes.status, "\x1b[0m",
+                    args.ANSIBlue, self.res.value.data[i].attributes.year, "\x1b[0m",
+                    args.ANSIBlue, if(self.res.value.data[i].attributes.lastVolume) |s| s else "?", "\x1b[0m",
+                    args.ANSIBlue, if(self.res.value.data[i].attributes.lastChapter) |s| s else "?", "\x1b[0m"
+                }
+            );
+            // Tags
+            try stdout.print("Tags: ", .{});
+            for(self.res.value.data[i].attributes.tags) |t| {
+                try stdout.print("[{s}{s}{s}]", .{ args.ANSIYellow, t.attributes.name.en, "\x1b[0m" });
+                try stdout.writeByte(' ');
+            }
+            _ = try stdout.write("\x1b[0m\n");
+            // Languages
+            try stdout.print("Languages: {s}", .{ args.ANSIMagenta });
+            for(self.res.value.data[i].attributes.availableTranslatedLanguages) |lang| {
+                _ = try stdout.write(lang);
+                try stdout.writeByte(' ');
+            }
+            _ = try stdout.write("\x1b[0m\n\n");
+            // Description
+            _ = try stdout.write(
+                if(self.res.value.data[i].attributes.description.object.get("en")) |s| s.string else "No description"
+            );
+            _ = try stdout.write("\n\n");
+            try bufw.flush();
+        }
+    }
+
+    pub fn print(self: *Self, color: bool) !void {
+        if(color) {
+            try self.printrColor(0, self.res.value.data.len);
+        } else {
+            try self.printr(0, self.res.value.data.len);
+        }
+    }
+};
+
+pub fn searchManga(title: []const u8, allocator: std.mem.Allocator) !MangaSearchResults {
+    var client = std.http.Client{ .allocator = allocator };
+    var link = try std.fmt.allocPrint(allocator, "https://api.mangadex.org/manga?title={s}", .{ title });
+    defer allocator.free(link);
+    var req = try client.request(
+        .GET, try std.Uri.parse(link), .{ .allocator = allocator }, .{}
+    );
+    defer req.deinit();
+    try req.start();
+    try req.wait();
+
+    var buf = try req.reader().readAllAlloc(allocator, 10_000_000);
+    var parsed = try std.json.parseFromSlice(MangaSearchRes, allocator, buf, .{
+        .ignore_unknown_fields = true
+    });
+
+    return MangaSearchResults {
+        ._buf = buf,
+        .allocator = allocator,
+        .res = parsed
     };
 }
 
@@ -373,7 +369,7 @@ const MangaVolChDataChapter = struct {
     count: u32
 };
 
-pub const MangaVolChData = struct {
+pub const MangaVolChRes = struct {
     result: []const u8,
     volumes: std.json.Value
 };
@@ -383,17 +379,17 @@ pub const MangaVolChResults = struct {
 
     _buf: []u8,
     allocator: std.mem.Allocator,
-    data: std.json.Parsed(MangaVolChData),
+    res: std.json.Parsed(MangaVolChRes),
 
     pub fn deinit(self: *Self) void {
-        self.data.deinit();
+        self.res.deinit();
         self.allocator.free(self._buf);
     }
 
     pub fn printr(self: *Self, start: usize, end: usize) !void {
         var bufw = std.io.bufferedWriter(std.io.getStdIn().writer());
         var stdout = bufw.writer();
-        var iter = self.data.value.volumes.object.iterator();
+        var iter = self.res.value.volumes.object.iterator();
         var i = start;
         while(iter.next()) |entry| {
             if(i >= end) { break; }
@@ -417,7 +413,7 @@ pub const MangaVolChResults = struct {
     pub fn printrColor(self: *Self, start: usize, end: usize) !void {
         var bufw = std.io.bufferedWriter(std.io.getStdIn().writer());
         var stdout = bufw.writer();
-        var iter = self.data.value.volumes.object.iterator();
+        var iter = self.res.value.volumes.object.iterator();
         var i = start;
         while(iter.next()) |entry| {
             if(i >= end) { break; }
@@ -442,9 +438,9 @@ pub const MangaVolChResults = struct {
 
     pub fn print(self: *Self, color: bool) !void {
         if(color) {
-            try self.printrColor(0, self.data.value.volumes.object.count());
+            try self.printrColor(0, self.res.value.volumes.object.count());
         } else {
-            try self.printr(0, self.data.value.volumes.object.count());
+            try self.printr(0, self.res.value.volumes.object.count());
         }
     }
 };
@@ -464,13 +460,13 @@ pub fn getMangaVolCh(lang: []const u8, id: []const u8, allocator: std.mem.Alloca
     try req.wait();
 
     var buf = try req.reader().readAllAlloc(allocator, 10_000_000);
-    var parsed = try std.json.parseFromSlice(MangaVolChData, allocator, buf, .{
+    var parsed = try std.json.parseFromSlice(MangaVolChRes, allocator, buf, .{
         .ignore_unknown_fields = true
     });
 
     return MangaVolChResults {
         ._buf = buf,
         .allocator = allocator,
-        .data = parsed
+        .res = parsed
     };
 }

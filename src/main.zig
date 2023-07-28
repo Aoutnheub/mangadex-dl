@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const args = @import("./args.zig");
 
-const DownloadClient = @import("./client.zig").DownloadClient;
+const ChapterDownloader = @import("./client.zig").ChapterDownloader;
 const searchManga = @import("./client.zig").searchManga;
 const getMangaVolCh = @import("./client.zig").getMangaVolCh;
 const getManga = @import("./client.zig").getManga;
@@ -238,17 +238,17 @@ pub fn main() !void {
                 try printError("Missing chapter id", .{});
                 std.process.exit(1);
             }
-            var dclient = try DownloadClient.init(std.heap.page_allocator, link);
-            dclient.file_name = runtime_opts.name;
-            defer dclient.deinit();
+            var client = try ChapterDownloader.init(std.heap.page_allocator, link);
+            client.file_name = runtime_opts.name;
+            defer client.deinit();
 
             // Print links if enabled
             if(runtime_opts.action == .PrintChapterLinks) {
                 var iter: [][]const u8 = undefined;
                 if(runtime_opts.data_saver) {
-                    iter = dclient.chapter_data.?.value.chapter.dataSaver;
+                    iter = client.chapter_res.?.value.chapter.dataSaver;
                 } else {
-                    iter = dclient.chapter_data.?.value.chapter.data;
+                    iter = client.chapter_res.?.value.chapter.data;
                 }
                 var start: usize = 0;
                 var end: usize = iter.len;
@@ -258,18 +258,18 @@ pub fn main() !void {
                 }
                 for(start..end) |i| {
                     try stdout.print("{s}/{s}/{s}/{s}\n", .{
-                        dclient.chapter_data.?.value.baseUrl,
+                        client.chapter_res.?.value.baseUrl,
                         if(runtime_opts.data_saver) "data-saver" else "data",
-                        dclient.chapter_data.?.value.chapter.hash, iter[i]
+                        client.chapter_res.?.value.chapter.hash, iter[i]
                     });
                 }
                 std.process.exit(0);
             } else {
                 // Download pages
                 if(runtime_opts.data_saver) {
-                    try dclient.downloadAllPagesDS(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
+                    try client.downloadAllPagesDS(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
                 } else {
-                    try dclient.downloadAllPages(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
+                    try client.downloadAllPages(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
                 }
             }
         },
@@ -282,7 +282,7 @@ pub fn main() !void {
                 if(runtime_opts.range) |r| {
                     var start: usize = r.@"0";
                     var end: usize = r.@"1";
-                    if(end > res.data.value.data.len) { end = res.data.value.data.len; }
+                    if(end > res.res.value.data.len) { end = res.res.value.data.len; }
                     if(runtime_opts.color) { try res.printrColor(start, end); }
                     else { try res.printr(start, end); }
                 } else { try res.print(runtime_opts.color); }
@@ -297,7 +297,7 @@ pub fn main() !void {
                 var res = try getManga(pos.items[0], std.heap.page_allocator);
                 defer res.deinit();
                 var cover_id: []const u8 = undefined;
-                for(res.data.value.data.relationships) |rel| {
+                for(res.res.value.data.relationships) |rel| {
                     if(
                         std.mem.eql(u8, rel.object.get("type").?.string, "cover_art") and
                         rel.object.get("attributes") != null
@@ -306,7 +306,7 @@ pub fn main() !void {
                     }
                 }
 
-                var ext = DownloadClient.extractFileExtension(cover_id);
+                var ext = std.fs.path.extension(cover_id);
                 var fname = try std.fmt.allocPrint(std.heap.page_allocator, "cover{s}", .{ ext });
                 defer std.heap.page_allocator.free(fname);
                 var link = try std.fmt.allocPrint(
@@ -337,8 +337,8 @@ pub fn main() !void {
                     if(runtime_opts.range) |r| {
                         var start: usize = r.@"0";
                         var end: usize = r.@"1";
-                        if(end > res.data.value.volumes.object.count()) {
-                            end = res.data.value.volumes.object.count();
+                        if(end > res.res.value.volumes.object.count()) {
+                            end = res.res.value.volumes.object.count();
                         }
                         if(runtime_opts.color) { try res.printrColor(start, end); }
                         else { try res.printr(start, end); }
