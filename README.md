@@ -3,7 +3,7 @@
 ![Banner](banner.svg)
 
 ![Version](https://img.shields.io/github/v/release/Aoutnheub/mangadex-dl?style=for-the-badge&label=Version&color=lawngreen)
-![License](https://img.shields.io/github/license/Aoutnheub/mangadex-dl?style=for-the-badge&label=License&color=darkturquoise)
+![License](https://img.shields.io/badge/License-MIT-darkturquoise?style=for-the-badge)
 
 CLI utility for browsing and downloading from Mangadex
 
