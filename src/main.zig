@@ -4,14 +4,24 @@ const args = @import("./args.zig");
 
 const DownloadClient = @import("./client.zig").DownloadClient;
 const searchManga = @import("./client.zig").searchManga;
+const getMangaVolCh = @import("./client.zig").getMangaVolCh;
 
 const stdout = std.io.getStdOut().writer();
 const stdin = std.io.getStdIn().reader();
 const stderr = std.io.getStdErr().writer();
-const version = "1.2";
+const version = "1.3";
+
+const Action = enum {
+    PrintHelp,
+    PrintVersion,
+    DownloadChapter,
+    PrintChapterLinks,
+    SearchManga,
+    PrintVolCh
+};
 
 var runtime_opts: struct {
-    print_links: bool = false,
+    action: Action = .DownloadChapter,
     color: bool = if(builtin.os.tag == .windows) false else true,
     data_saver: bool = false,
     range: ?std.meta.Tuple(&.{ u32, u32 }) = null,
@@ -73,7 +83,14 @@ fn onFileOverwrite(fname: []const u8) !bool {
     }
 }
 
-fn parseRange(range: []const u8) !struct{ u32, u32 } {
+const RangeError = error {
+    InvalidStart, BiggerEnd
+};
+
+// The range returned will be exclusive and start from range[0]-1
+// Ex: For "2-4" it will return [1, 4]
+// Hope that makes sense :)
+fn parseRange(range: []const u8) (std.fmt.ParseIntError || RangeError)!struct{ u32, u32 } {
     var iter = std.mem.tokenize(u8, range, "- ");
     var nums: [2]u32 = .{ 0, 0 };
     var idx: usize = 0;
@@ -83,6 +100,14 @@ fn parseRange(range: []const u8) !struct{ u32, u32 } {
         nums[idx] = try std.fmt.parseUnsigned(u8, n, 10);
         idx += 1;
     }
+
+    if(nums[0] == 0) {
+        return RangeError.InvalidStart;
+    }
+    if(nums[0] > nums[1]) {
+        return RangeError.BiggerEnd;
+    }
+    nums[0] -= 1;
 
     return .{ nums[0], nums[1] };
 }
@@ -102,12 +127,14 @@ pub fn main() !void {
     try parser.addFlag("print-links", "Print the links to all the pages without downloading any", 'l');
     try parser.addFlag("color", "Toggle colored output. Enabled by default if not on Windows", null);
     try parser.addFlag("data-saver", "Download compressed images. Smaller size, less quality", 's');
-    try parser.addFlag("search", "Search for a manga", null);
+    try parser.addFlag("search", "Search for a manga", 'S');
+    try parser.addFlag("volch", "Print volumes and chapters of manga", 'C');
     // Options
     try parser.addOption(
         "range",
-        \\Download pages in this range.
-        \\Ex: "3-12"
+        \\Select items in this range.
+        \\Ex: "mangadex-dl <CHAPTER> -r 2-5" will only download pages 2 to 5
+        \\    "mangadex-dl --search <TITLE> -r 1-2" will only show the first 2 results
         , 'r', null, null
     );
     try parser.addOption("name", "Name of the downloaded images excluding file extension", 'n', null, null);
@@ -135,93 +162,151 @@ pub fn main() !void {
     defer results.deinit();
 
     // Set runtime options
-    if(results.flag) |flag| {
-        if(flag.get("color") != null) {
-            runtime_opts.color = !runtime_opts.color;
-        }
+    if(results.flag) |flag| FLAG_CHECK: {
+        if(flag.get("color") != null) { runtime_opts.color = !runtime_opts.color; }
         if(flag.get("help") != null) {
-            try parser.help();
-            std.process.exit(0);
+            runtime_opts.action = .PrintHelp;
+            break :FLAG_CHECK;
         }
         if(flag.get("version") != null) {
+            runtime_opts.action = .PrintVersion;
+            break :FLAG_CHECK;
+        }
+        if(flag.get("search") != null) { runtime_opts.action = .SearchManga; }
+        if(flag.get("volch") != null) { runtime_opts.action = .PrintVolCh; }
+        if(flag.get("print-links") != null) { runtime_opts.action = .PrintChapterLinks; }
+        if(flag.get("data-saver") != null) { runtime_opts.data_saver = true; }
+    }
+    if(results.option) |option| {
+        var range_opt = option.get("range");
+        if(range_opt) |ro| {
+            runtime_opts.range = parseRange(ro) catch |err| {
+                switch(err) {
+                    error.InvalidStart => {
+                        try printError("Invalid range. Start from 1", .{});
+                        std.process.exit(1);
+                    },
+                    error.BiggerEnd => {
+                        try printError("Invalid range. End must be bigger than start", .{});
+                        std.process.exit(1);
+                    },
+                    else => {
+                        try printError("Could not parse range", .{});
+                        std.process.exit(1);
+                    }
+                }
+            };
+        }
+        runtime_opts.name = option.get("name");
+    }
+
+    switch(runtime_opts.action) {
+        .PrintHelp => {
+            try parser.help();
+            std.process.exit(0);
+        },
+        .PrintVersion => {
             try stdout.print("Version " ++ version ++ "\n", .{});
             std.process.exit(0);
-        }
-        if(flag.get("search") != null) {
+        },
+        .DownloadChapter, .PrintChapterLinks => {
+            // Get chapter data
+            var link: []const u8 = undefined;
+            defer std.heap.page_allocator.free(link);
+            if(results.positional) |positional| {
+                link = try std.mem.concat(std.heap.page_allocator, u8, &.{
+                    "https://api.mangadex.org/at-home/server/", positional.items[0]
+                });
+            } else {
+                try printError("Missing chapter id", .{});
+                std.process.exit(1);
+            }
+            var dclient = try DownloadClient.init(std.heap.page_allocator, link);
+            dclient.file_name = runtime_opts.name;
+            defer dclient.deinit();
+
+            // Print links if enabled
+            if(runtime_opts.action == .PrintChapterLinks) {
+                // TODO : Rewrite this in a less sucky way
+                if(runtime_opts.data_saver) {
+                    var start: usize = 0;
+                    var end: usize = dclient.chapter_data.?.value.chapter.dataSaver.len;
+                    if(runtime_opts.range) |r| {
+                        start = r.@"0";
+                        if(r.@"1" > end) {
+                            try printError("Range end too big", .{});
+                            std.process.exit(1);
+                        }
+                        end = r.@"1";
+                    }
+                    for(start..end) |i| {
+                        try stdout.print("{s}/data-saver/{s}/{s}\n", .{
+                            dclient.chapter_data.?.value.baseUrl, dclient.chapter_data.?.value.chapter.hash,
+                            dclient.chapter_data.?.value.chapter.dataSaver[i]
+                        });
+                    }
+                } else {
+                    var start: usize = 0;
+                    var end: usize = dclient.chapter_data.?.value.chapter.data.len;
+                    if(runtime_opts.range) |r| {
+                        start = r.@"0";
+                        if(r.@"1" > end) {
+                            try printError("Range end too big", .{});
+                            std.process.exit(1);
+                        }
+                        end = r.@"1";
+                    }
+                    for(start..end) |i| {
+                        try stdout.print("{s}/data/{s}/{s}\n", .{
+                            dclient.chapter_data.?.value.baseUrl, dclient.chapter_data.?.value.chapter.hash,
+                            dclient.chapter_data.?.value.chapter.data[i]
+                        });
+                    }
+                }
+                std.process.exit(0);
+            } else {
+                // Download pages
+                if(runtime_opts.data_saver) {
+                    try dclient.downloadAllPagesDS(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
+                } else {
+                    try dclient.downloadAllPages(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
+                }
+            }
+        },
+        .SearchManga => {
             if(results.positional) |pos| {
                 var title = try std.mem.join(std.heap.page_allocator, " ", pos.items);
                 defer std.heap.page_allocator.free(title);
                 var res = try searchManga(title, std.heap.page_allocator);
                 defer res.deinit();
-                try res.print(runtime_opts.color);
+                if(runtime_opts.range) |r| {
+                    if(runtime_opts.color) { try res.printrColor(r.@"0", r.@"1"); }
+                    else { try res.printr(r.@"0", r.@"1"); }
+                } else { try res.print(runtime_opts.color); }
                 std.os.exit(0);
             } else {
                 try printError("Nothing to search for", .{});
                 std.os.exit(1);
             }
-        }
-        if(flag.get("print-links") != null) {
-            runtime_opts.print_links = true;
-        }
-        if(flag.get("data-saver") != null) {
-            runtime_opts.data_saver = true;
-        }
-    }
-    if(results.option) |option| {
-        var range_opt = option.get("range");
-        if(range_opt != null) {
-            runtime_opts.range = try parseRange(range_opt.?);
-            if(runtime_opts.range.?.@"0" == 0 or runtime_opts.range.?.@"1" == 0) {
-                try printError("Invalid range. Pages start from 1", .{});
-                std.process.exit(1);
-            }
-            runtime_opts.range.?.@"0" -= 1;
-            runtime_opts.range.?.@"1" -= 1;
-            if(runtime_opts.range.?.@"0" > runtime_opts.range.?.@"1") {
-                try printError("Invalid range. End must be bigger than start", .{});
-                std.process.exit(1);
+        },
+        .PrintVolCh => {
+            if(results.positional) |pos| {
+                if(pos.items.len == 2) {
+                    var res = try getMangaVolCh(pos.items[0], pos.items[1], std.heap.page_allocator);
+                    defer res.deinit();
+                    if(runtime_opts.range) |r| {
+                        if(runtime_opts.color) { try res.printrColor(r.@"0", r.@"1"); }
+                        else { try res.printr(r.@"0", r.@"1"); }
+                    } else { try res.print(runtime_opts.color); }
+                    std.os.exit(0);
+                } else {
+                    try printError("Two arguments required <LANG> <ID>", .{});
+                    std.os.exit(1);
+                }
+            } else {
+                try printError("No arguments given", .{});
+                std.os.exit(1);
             }
         }
-        runtime_opts.name = option.get("name");
-    }
-
-    // Get chapter data
-    var link: []const u8 = undefined;
-    defer std.heap.page_allocator.free(link);
-    if(results.positional) |positional| {
-        link = try std.mem.concat(std.heap.page_allocator, u8, &.{
-            "https://api.mangadex.org/at-home/server/", positional.items[0]
-        });
-    } else {
-        try printError("Missing chapter id", .{});
-        std.process.exit(1);
-    }
-    var dclient = try DownloadClient.init(std.heap.page_allocator, link);
-    dclient.file_name = runtime_opts.name;
-    defer dclient.deinit();
-
-    // Print links if enabled
-    if(runtime_opts.print_links) {
-        if(runtime_opts.data_saver) {
-            for(dclient.chapter_data.?.value.chapter.dataSaver) |l| {
-                try stdout.print("{s}/data-saver/{s}/{s}\n", .{
-                    dclient.chapter_data.?.value.baseUrl, dclient.chapter_data.?.value.chapter.hash, l
-                });
-            }
-        } else {
-            for(dclient.chapter_data.?.value.chapter.data) |l| {
-                try stdout.print("{s}/data/{s}/{s}\n", .{
-                    dclient.chapter_data.?.value.baseUrl, dclient.chapter_data.?.value.chapter.hash, l
-                });
-            }
-        }
-        std.process.exit(0);
-    }
-
-    // Download pages
-    if(runtime_opts.data_saver) {
-        try dclient.downloadAllPagesDS(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
-    } else {
-        try dclient.downloadAllPages(runtime_opts.range, onStartPageDw, onEndPageDw, onFileOverwrite);
     }
 }

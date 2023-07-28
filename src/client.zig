@@ -107,11 +107,11 @@ pub const DownloadClient = struct {
         var rstart: usize = 0;
         var rend: usize = iter.len;
         if(range != null) {
-            if(range.?.@"1" + 1 > iter.len) {
+            if(range.?.@"1" > iter.len) {
                 return error.InvalidRange;
             }
             rstart = range.?.@"0";
-            rend = range.?.@"1" + 1;
+            rend = range.?.@"1";
         }
         for(rstart..rend) |i| {
             var fname = iter[i];
@@ -130,7 +130,7 @@ pub const DownloadClient = struct {
                     else => return err
                 }
             };
-            var overwrite = false;
+            var overwrite = true;
             if(file_exists) { overwrite = try overwrite_callback(fname); }
 
             if(overwrite) {
@@ -149,71 +149,56 @@ pub const DownloadClient = struct {
     }
 };
 
-pub const SearchDataEntryRel = struct {
-    id: []const u8,
-    @"type": []const u8,
-    related: ?[]const u8
-};
-
-pub const SearchDataEntryTag = struct {
-    id: []const u8,
-    @"type": []const u8,
-    attributes: struct {
-        name: struct {
-            en: []const u8
-        },
-        // description: -
-        group: []const u8,
-        version: u32
-    }
-    // relationships: []SearchDataEntryRel
-};
-
-pub const SearchDataEntry = struct {
-    id: []const u8,
-    @"type": []const u8,
-    attributes: struct {
-        title: struct {
-            en: []const u8
-        },
-        // altTitles: -
-        description: std.json.Value, // Object but sometimes empty
-        isLocked: bool,
-        // links: -
-        originalLanguage: []const u8,
-        lastVolume: ?[]const u8,
-        lastChapter: ?[]const u8,
-        publicationDemographic: ?[]const u8,
-        status: []const u8,
-        year: ?u32,
-        contentRating: []const u8,
-        tags: []SearchDataEntryTag,
-        state: []const u8,
-        chapterNumbersResetOnNewVolume: bool,
-        createdAt: []const u8,
-        updatedAt: []const u8,
-        version: u32,
-        availableTranslatedLanguages: [][]const u8,
-        latestUploadedChapter: ?[]const u8,
-    },
-    // relationships: []SearchDataEntryRel
-};
-
-pub const SearchData = struct {
+pub const MangaSearchData = struct {
     result: []const u8,
     response: []const u8,
-    data: []SearchDataEntry,
+    data: []struct {
+        id: []const u8,
+        @"type": []const u8,
+        attributes: struct {
+            title: struct {
+                en: []const u8
+            },
+            description: std.json.Value, // Object but sometimes empty
+            isLocked: bool,
+            originalLanguage: []const u8,
+            lastVolume: ?[]const u8,
+            lastChapter: ?[]const u8,
+            publicationDemographic: ?[]const u8,
+            status: []const u8,
+            year: ?u32,
+            contentRating: []const u8,
+            tags: []struct {
+                id: []const u8,
+                @"type": []const u8,
+                attributes: struct {
+                    name: struct {
+                        en: []const u8
+                    },
+                    group: []const u8,
+                    version: u32
+                }
+            },
+            state: []const u8,
+            chapterNumbersResetOnNewVolume: bool,
+            createdAt: []const u8,
+            updatedAt: []const u8,
+            version: u32,
+            availableTranslatedLanguages: [][]const u8,
+            latestUploadedChapter: ?[]const u8,
+        },
+    },
     limit: u32,
     offset: u32,
     total: u32
 };
 
-pub const SearchResults = struct {
+pub const MangaSearchResults = struct {
     const Self = @This();
 
     _buf: []u8,
     allocator: std.mem.Allocator,
-    data: std.json.Parsed(SearchData),
+    data: std.json.Parsed(MangaSearchData),
 
     pub fn deinit(self: *Self) void {
         self.data.deinit();
@@ -312,7 +297,7 @@ pub const SearchResults = struct {
     }
 };
 
-pub fn searchManga(title: []const u8, allocator: std.mem.Allocator) !SearchResults {
+pub fn searchManga(title: []const u8, allocator: std.mem.Allocator) !MangaSearchResults {
     var client = std.http.Client{ .allocator = allocator };
     var link = try std.fmt.allocPrint(allocator, "https://api.mangadex.org/manga?title={s}", .{ title });
     defer allocator.free(link);
@@ -324,11 +309,120 @@ pub fn searchManga(title: []const u8, allocator: std.mem.Allocator) !SearchResul
     try req.wait();
 
     var buf = try req.reader().readAllAlloc(allocator, 10_000_000);
-    var parsed = try std.json.parseFromSlice(SearchData, allocator, buf, .{
+    var parsed = try std.json.parseFromSlice(MangaSearchData, allocator, buf, .{
         .ignore_unknown_fields = true
     });
 
-    return SearchResults {
+    return MangaSearchResults {
+        ._buf = buf,
+        .allocator = allocator,
+        .data = parsed
+    };
+}
+
+const MangaVolChDataChapter = struct {
+    chapter: []const u8,
+    id: []const u8,
+    others: [][]const u8,
+    count: u32
+};
+
+pub const MangaVolChData = struct {
+    result: []const u8,
+    volumes: std.json.Value
+};
+
+pub const MangaVolChResults = struct {
+    const Self = @This();
+
+    _buf: []u8,
+    allocator: std.mem.Allocator,
+    data: std.json.Parsed(MangaVolChData),
+
+    pub fn deinit(self: *Self) void {
+        self.data.deinit();
+        self.allocator.free(self._buf);
+    }
+
+    pub fn printr(self: *Self, start: usize, end: usize) !void {
+        var bufw = std.io.bufferedWriter(std.io.getStdIn().writer());
+        var stdout = bufw.writer();
+        var iter = self.data.value.volumes.object.iterator();
+        var i = start;
+        while(iter.next()) |entry| {
+            if(i >= end) { break; }
+
+            try stdout.print("Volume {s}\n", .{ entry.key_ptr.* });
+            var ch_iter = entry.value_ptr.*.object.get("chapters").?.object.iterator();
+            while(ch_iter.next()) |ch| {
+                var chapter = try std.json.parseFromValue(
+                    MangaVolChDataChapter, std.heap.page_allocator, ch.value_ptr.*,
+                    .{ .ignore_unknown_fields = true }
+                );
+                defer chapter.deinit();
+                try stdout.print("    Chapter {s} ({s})\n", .{ chapter.value.chapter, chapter.value.id });
+            }
+            try stdout.writeByte('\n');
+            try bufw.flush();
+            i += 1;
+        }
+    }
+
+    pub fn printrColor(self: *Self, start: usize, end: usize) !void {
+        var bufw = std.io.bufferedWriter(std.io.getStdIn().writer());
+        var stdout = bufw.writer();
+        var iter = self.data.value.volumes.object.iterator();
+        var i = start;
+        while(iter.next()) |entry| {
+            if(i >= end) { break; }
+
+            try stdout.print("{s}Volume {s}{s}\n", .{ args.ANSIGreen, entry.key_ptr.*, "\x1b[0m" });
+            var ch_iter = entry.value_ptr.*.object.get("chapters").?.object.iterator();
+            while(ch_iter.next()) |ch| {
+                var chapter = try std.json.parseFromValue(
+                    MangaVolChDataChapter, std.heap.page_allocator, ch.value_ptr.*,
+                    .{ .ignore_unknown_fields = true }
+                );
+                defer chapter.deinit();
+                try stdout.print("    Chapter {s} {s}({s}){s}\n", .{
+                    chapter.value.chapter, args.ANSIBlack, chapter.value.id, "\x1b[0m"
+                });
+            }
+            try stdout.writeByte('\n');
+            try bufw.flush();
+            i += 1;
+        }
+    }
+
+    pub fn print(self: *Self, color: bool) !void {
+        if(color) {
+            try self.printrColor(0, self.data.value.volumes.object.count());
+        } else {
+            try self.printr(0, self.data.value.volumes.object.count());
+        }
+    }
+};
+
+pub fn getMangaVolCh(lang: []const u8, id: []const u8, allocator: std.mem.Allocator) !MangaVolChResults {
+    var client = std.http.Client{ .allocator = allocator };
+    var link = try std.fmt.allocPrint(
+        allocator, "https://api.mangadex.org/manga/{s}/aggregate?translatedLanguage[]={s}",
+        .{ id, lang }
+    );
+    defer allocator.free(link);
+    var req = try client.request(
+        .GET, try std.Uri.parse(link), .{ .allocator = allocator }, .{}
+    );
+    defer req.deinit();
+    try req.start();
+    try req.wait();
+
+    var buf = try req.reader().readAllAlloc(allocator, 10_000_000);
+    var parsed = try std.json.parseFromSlice(MangaVolChData, allocator, buf, .{
+        .ignore_unknown_fields = true
+    });
+
+    return MangaVolChResults {
         ._buf = buf,
         .allocator = allocator,
         .data = parsed

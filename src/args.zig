@@ -1,6 +1,6 @@
 /// MIT License
 
-/// Copyright (c) 2022 Aoutnheub
+/// Copyright (c) 2023 Aoutnheub
 
 /// Permission is hereby granted, free of charge, to any person obtaining a copy
 /// of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 /// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 /// SOFTWARE.
 
-/// Tested on Zig version: 0.11.0-dev.3950+a75531073
+/// Tested on Zig version: 0.11.0-dev.4173+8924f81d8
 
 const std = @import("std");
 
@@ -444,6 +444,9 @@ pub const Parser = struct {
                     try results.option.?.put(entry.key_ptr.*, entry.value_ptr.*.defaults_to.?);
                 }
             }
+        }
+        defer {
+            if(results.option.?.count() == 0) { results.option.?.deinit(); }
         }
 
         var i: usize = 1;
