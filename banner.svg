@@ -75,7 +75,7 @@
      id="path20" />
   <text
      xml:space="preserve"
-     style="font-size:14.6667px;line-height:1.25;font-family:Montserrat;-inkscape-font-specification:'Montserrat, Normal'"
+     style="font-size:14.6667px;line-height:1.25;font-family:Montserrat;-inkscape-font-specification:'Montserrat, Normal';fill:#ff6740;fill-opacity:1"
      x="39.510487"
      y="24.34"
      id="text309"><tspan
@@ -83,5 +83,5 @@
        id="tspan307"
        x="39.510487"
        y="24.34"
-       style="font-style:italic;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:20px;font-family:Montserrat;-inkscape-font-specification:'Montserrat, Bold Italic';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#212121;fill-opacity:1">-dl</tspan></text>
+       style="font-style:italic;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:20px;font-family:Montserrat;-inkscape-font-specification:'Montserrat, Bold Italic';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#ff6740;fill-opacity:1">-dl</tspan></text>
 </svg>
