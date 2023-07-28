@@ -1,3 +1,7 @@
+## Version 1.4
+
+- Range improvements (use "n" to specify the end)
+
 ## Version 1.3
 
 - Added option to list volumes and chapters of a manga

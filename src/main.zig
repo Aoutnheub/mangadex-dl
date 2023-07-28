@@ -97,7 +97,11 @@ fn parseRange(range: []const u8) (std.fmt.ParseIntError || RangeError)!struct{ u
     while(iter.next()) |n| {
         if(n.len == 0) { continue; }
         if(idx == 2) { break; }
-        nums[idx] = try std.fmt.parseUnsigned(u8, n, 10);
+        if(std.mem.eql(u8, n, "n")) {
+            nums[idx] = 9999;
+        } else {
+            nums[idx] = try std.fmt.parseUnsigned(u8, n, 10);
+        }
         idx += 1;
     }
 
@@ -132,9 +136,9 @@ pub fn main() !void {
     // Options
     try parser.addOption(
         "range",
-        \\Select items in this range.
-        \\Ex: "mangadex-dl <CHAPTER> -r 2-5" will only download pages 2 to 5
-        \\    "mangadex-dl --search <TITLE> -r 1-2" will only show the first 2 results
+        \\Select items in this range. Use "n" (Ex: "-r 2-n") to specify the end.
+        \\Ex: "mangadex-dl <CHAPTER> -r 2-5" will only download pages 2 to 5.
+        \\    "mangadex-dl --search <TITLE> -r 1-2" will only show the first 2 results.
         , 'r', null, null
     );
     try parser.addOption("name", "Name of the downloaded images excluding file extension", 'n', null, null);
@@ -237,11 +241,7 @@ pub fn main() !void {
                 var end: usize = iter.len;
                 if(runtime_opts.range) |r| {
                     start = r.@"0";
-                    if(r.@"1" > end) {
-                        try printError("Range end too big", .{});
-                        std.process.exit(1);
-                    }
-                    end = r.@"1";
+                    if(r.@"1" <= end) { end = r.@"1"; }
                 }
                 for(start..end) |i| {
                     try stdout.print("{s}/{s}/{s}/{s}\n", .{
@@ -267,8 +267,11 @@ pub fn main() !void {
                 var res = try searchManga(title, std.heap.page_allocator);
                 defer res.deinit();
                 if(runtime_opts.range) |r| {
-                    if(runtime_opts.color) { try res.printrColor(r.@"0", r.@"1"); }
-                    else { try res.printr(r.@"0", r.@"1"); }
+                    var start: usize = r.@"0";
+                    var end: usize = r.@"1";
+                    if(end > res.data.value.data.len) { end = res.data.value.data.len; }
+                    if(runtime_opts.color) { try res.printrColor(start, end); }
+                    else { try res.printr(start, end); }
                 } else { try res.print(runtime_opts.color); }
                 std.os.exit(0);
             } else {
@@ -282,8 +285,13 @@ pub fn main() !void {
                     var res = try getMangaVolCh(pos.items[0], pos.items[1], std.heap.page_allocator);
                     defer res.deinit();
                     if(runtime_opts.range) |r| {
-                        if(runtime_opts.color) { try res.printrColor(r.@"0", r.@"1"); }
-                        else { try res.printr(r.@"0", r.@"1"); }
+                        var start: usize = r.@"0";
+                        var end: usize = r.@"1";
+                        if(end > res.data.value.volumes.object.count()) {
+                            end = res.data.value.volumes.object.count();
+                        }
+                        if(runtime_opts.color) { try res.printrColor(start, end); }
+                        else { try res.printr(start, end); }
                     } else { try res.print(runtime_opts.color); }
                     std.os.exit(0);
                 } else {

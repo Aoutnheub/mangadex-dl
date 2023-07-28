@@ -106,12 +106,9 @@ pub const DownloadClient = struct {
     ) !void {
         var rstart: usize = 0;
         var rend: usize = iter.len;
-        if(range != null) {
-            if(range.?.@"1" > iter.len) {
-                return error.InvalidRange;
-            }
-            rstart = range.?.@"0";
-            rend = range.?.@"1";
+        if(range) |r| {
+            if(r.@"1" <= iter.len) { rend = r.@"1"; }
+            rstart = r.@"0";
         }
         for(rstart..rend) |i| {
             var fname = iter[i];
