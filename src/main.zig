@@ -10,7 +10,7 @@ const getManga = @import("./client.zig").getManga;
 const stdout = std.io.getStdOut().writer();
 const stdin = std.io.getStdIn().reader();
 const stderr = std.io.getStdErr().writer();
-const version = "1.4";
+const version = "1.4.1";
 
 const Action = enum {
     PrintHelp,
@@ -56,11 +56,11 @@ fn iWarn(msg: []const u8, opts: []const u8) !u8 {
     return b;
 }
 
-fn onStartPageDw(fname: []const u8) !void {
+fn onStartPageDw(fname: []const u8) anyerror!void {
     try stdout.print("Downloading page {s}... ", .{ fname });
 }
 
-fn onEndPageDw() !void {
+fn onEndPageDw() anyerror!void {
     if(runtime_opts.color) {
         try stdout.print("{s}Done{s}\n", .{ args.ANSIGreen, "\x1b[0m" });
     } else {
@@ -68,7 +68,7 @@ fn onEndPageDw() !void {
     }
 }
 
-fn onFileOverwrite(fname: []const u8) !bool {
+fn onFileOverwrite(fname: []const u8) anyerror!bool {
     var msg = try std.fmt.allocPrint(
         std.heap.page_allocator, "File \"{s}\" already exists. Overwrite it?", .{ fname }
     );

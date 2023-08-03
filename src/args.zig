@@ -20,7 +20,7 @@
 /// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 /// SOFTWARE.
 
-/// Tested on Zig version: 0.11.0-dev.4173+8924f81d8
+/// Tested on Zig version: 0.11.0
 
 const std = @import("std");
 
@@ -446,7 +446,9 @@ pub const Parser = struct {
             }
         }
         defer {
-            if(results.option.?.count() == 0) { results.option.?.deinit(); }
+            if(self._options.count() != 0 and results.option.?.count() == 0) {
+                results.option.?.deinit();
+            }
         }
 
         var i: usize = 1;

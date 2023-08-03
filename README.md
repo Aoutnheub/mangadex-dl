@@ -15,7 +15,7 @@ From [Releases](https://github.com/Aoutnheub/mangadex-dl/releases)
 
 ### :wrench: Build from source
 
-Requires zig version *0.11.0-dev.3950+a75531073* or later
+Requires zig version *0.11.0* or later
 
 ```sh
 git clone https://github.com/Aoutnheub/mangadex-dl
