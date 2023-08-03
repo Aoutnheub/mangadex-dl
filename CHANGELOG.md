@@ -1,3 +1,7 @@
+## Version 1.4.1
+
+- Updated for zig 0.11.0
+
 ## Version 1.4
 
 - Range improvements (use "n" to specify the end)
