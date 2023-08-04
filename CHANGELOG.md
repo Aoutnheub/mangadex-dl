@@ -1,3 +1,7 @@
+## Version 1.4.2
+
+- Fixed an issue that prevented compilation on Windows
+
 ## Version 1.4.1
 
 - Updated for zig 0.11.0

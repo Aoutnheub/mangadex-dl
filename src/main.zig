@@ -7,10 +7,7 @@ const searchManga = @import("./client.zig").searchManga;
 const getMangaVolCh = @import("./client.zig").getMangaVolCh;
 const getManga = @import("./client.zig").getManga;
 
-const stdout = std.io.getStdOut().writer();
-const stdin = std.io.getStdIn().reader();
-const stderr = std.io.getStdErr().writer();
-const version = "1.4.1";
+const version = "1.4.2";
 
 const Action = enum {
     PrintHelp,
@@ -31,6 +28,7 @@ var runtime_opts: struct {
 } = .{};
 
 fn printError(comptime fmt: []const u8, _args: anytype) !void {
+    const stderr = std.io.getStdErr().writer();
     if(runtime_opts.color) {
         try stderr.print("[{s}Error{s}] ", .{ args.ANSIRed, "\x1b[0m" });
     } else {
@@ -40,6 +38,8 @@ fn printError(comptime fmt: []const u8, _args: anytype) !void {
 }
 
 fn iWarn(msg: []const u8, opts: []const u8) !u8 {
+    const stdout = std.io.getStdOut().writer();
+    const stdin = std.io.getStdIn().reader();
     if(runtime_opts.color) {
         try stdout.print("[{s}Warning{s}] {s} [", .{ args.ANSIYellow, "\x1b[0m", msg });
     } else {
@@ -57,10 +57,11 @@ fn iWarn(msg: []const u8, opts: []const u8) !u8 {
 }
 
 fn onStartPageDw(fname: []const u8) anyerror!void {
-    try stdout.print("Downloading page {s}... ", .{ fname });
+    try std.io.getStdOut().writer().print("Downloading page {s}... ", .{ fname });
 }
 
 fn onEndPageDw() anyerror!void {
+    const stdout = std.io.getStdOut().writer();
     if(runtime_opts.color) {
         try stdout.print("{s}Done{s}\n", .{ args.ANSIGreen, "\x1b[0m" });
     } else {
@@ -119,6 +120,8 @@ fn parseRange(range: []const u8) (std.fmt.ParseIntError || RangeError)!struct{ u
 }
 
 pub fn main() !void {
+    const stdout = std.io.getStdOut().writer();
+
     // Argument parser
     var parser = args.Parser.init(
         std.heap.page_allocator, "mangadex-dl " ++ version,
