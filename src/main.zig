@@ -7,7 +7,7 @@ const searchManga = @import("./client.zig").searchManga;
 const getMangaVolCh = @import("./client.zig").getMangaVolCh;
 const getManga = @import("./client.zig").getManga;
 
-const version = "1.4.2";
+const version = "1.4.3";
 
 const Action = enum {
     PrintHelp,
@@ -24,7 +24,7 @@ var runtime_opts: struct {
     color: bool = if(builtin.os.tag == .windows) false else true,
     data_saver: bool = false,
     range: ?std.meta.Tuple(&.{ u32, u32 }) = null,
-    name: ?[]const u8 = null,
+    output: ?[]const u8 = null,
 } = .{};
 
 fn printError(comptime fmt: []const u8, _args: anytype) !void {
@@ -217,7 +217,7 @@ pub fn main() !void {
                 }
             };
         }
-        runtime_opts.name = option.get("name");
+        runtime_opts.output = option.get("output");
     }
 
     switch(runtime_opts.action) {
@@ -242,7 +242,7 @@ pub fn main() !void {
                 std.process.exit(1);
             }
             var client = try ChapterDownloader.init(std.heap.page_allocator, link);
-            client.file_name = runtime_opts.name;
+            client.file_name = runtime_opts.output;
             defer client.deinit();
 
             // Print links if enabled

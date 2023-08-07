@@ -1,3 +1,7 @@
+## Version 1.4.3
+
+- Fixed 'output' option not working
+
 ## Version 1.4.2
 
 - Fixed an issue that prevented compilation on Windows
